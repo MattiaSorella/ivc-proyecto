@@ -6,7 +6,7 @@ for i = 1:length(archivos)
 	imagen = imread(fullfile(directorio, archivos(i).name));
 	
 	%----------------------------------------------------------------------------
-	% 1º QUITAR VERDE
+	% 1º QUITAR VERDE - CROMA
 	% ---------------------------------------------------------------------------
 	% Convertir la imagen a HSV
 	hsvImage = rgb2hsv(imagen);
@@ -27,7 +27,7 @@ for i = 1:length(archivos)
 	imagen_sujeto_segmentado = bsxfun(@times, imagen, cast(mascara_fondo, 'like', imagen));
 
 	%----------------------------------------------------------------------------
-	% 2º QUITAR TODO MENOS LO VERDE
+	% 2º QUITAR TODO MENOS LO VERDE - FONDO
 	% ---------------------------------------------------------------------------
 	% Convert image to HSV to better isolate the subject
 	hsvImage = rgb2hsv(imagen);
