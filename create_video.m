@@ -2,8 +2,10 @@
 load('pilot-tracker.mat');
 % Specify the directory
 directory = './F15 Image Plane';
+directoryOcean = './F15 Ocean'; 
 % Get a list of all .png files in the directory
 files = dir(fullfile(directory, '*.png'));
+oceanFiles = dir(fullfile(directoryOcean, '*.png'));
 % Create a VideoWriter object
 outputVideo = VideoWriter('output.avi', 'Uncompressed AVI');
 % Open the VideoWriter object
@@ -12,10 +14,17 @@ open(outputVideo);
 % Initialize the last bounding box
 lastBbox = [];
 
+% Create a directory for the processed images
+processedDirectory = './F15 Image Plane-noBG';
+if ~exist(processedDirectory, 'dir')
+    mkdir(processedDirectory);
+end
+
 % Loop over all files
 for i = 1:length(files)
     % Read the current image
     img = imread(fullfile(directory, files(i).name));
+    oceanImage = imread(fullfile(directoryOcean, oceanFiles(i).name));
     
     % Get the bounding box for the current image from the ground truth data
     bbox = gTruth.LabelData{i, 1};
@@ -90,7 +99,12 @@ for i = 1:length(files)
     img(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :) = region;
     
     % Write the current image to the video file
-    writeVideo(outputVideo, img);
+    % writeVideo(outputVideo, img);
+    oceanImage = cat(3, oceanImage, 255*ones(size(oceanImage, 1), size(oceanImage, 2), 'uint8'));
+    img(:,:,4) = 255; 
+    img = img + oceanImage;
+    % Save the processed image to the new directory
+    imwrite(img(:,:,1:3), fullfile(processedDirectory, files(i).name), 'png', 'Alpha', img(:,:,4));
 end
 % Close the VideoWriter object
 close(outputVideo);
