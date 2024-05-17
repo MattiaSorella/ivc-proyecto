@@ -1,34 +1,27 @@
 % Load the ground truth data
 load('pilot-tracker.mat');
-
 % Specify the directory
 directory = './F15 Image Plane';
-directoryOcean = './F15 Ocean';
-
+% Define the output directory
+outputDirectory = './F15 Image Plane no bg';
+% Check if the output directory exists, if not, create it
+if ~exist(outputDirectory, 'dir')
+    mkdir(outputDirectory);
+end
 % Get a list of all .png files in the directory
 files = dir(fullfile(directory, '*.png'));
-oceanFiles = dir(fullfile(directoryOcean, '*.png'));
-
 % Create a VideoWriter object
 outputVideo = VideoWriter('output.avi', 'Uncompressed AVI');
-
 % Open the VideoWriter object
 open(outputVideo);
 
 % Initialize the last bounding box
 lastBbox = [];
 
-% Create a directory for the processed images
-processedDirectory = './F15 Image Plane-noBG';
-if ~exist(processedDirectory, 'dir')
-    mkdir(processedDirectory);
-end
-
 % Loop over all files
 for i = 1:length(files)
     % Read the current image
     img = imread(fullfile(directory, files(i).name));
-    oceanImage = imread(fullfile(directoryOcean, oceanFiles(i).name));
     
     % Get the bounding box for the current image from the ground truth data
     bbox = gTruth.LabelData{i, 1};
@@ -63,10 +56,10 @@ for i = 1:length(files)
     % Set the pixels inside the bounding box to 1
     mask(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3)) = true;
     % Multiply the image by the mask to remove pixels outside the bounding box
-    imgMasked = bsxfun(@times, img, cast(mask, class(img)));
+    img = bsxfun(@times, img, cast(mask, class(img)));
     
     % Extract the region of the image inside the bounding box
-    region = imgMasked(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :);
+    region = img(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :);
     
     %----------------------------------------------------------------------------
     % 2. Quitar todo el croma de dentro de la imagen
@@ -77,9 +70,9 @@ for i = 1:length(files)
     greenThreshold = hsvImage(:,:,1) > 0.25 & hsvImage(:,:,1) < 0.75 ...
         & hsvImage(:,:,2) > 0.2 & hsvImage(:,:,3) > 0.3;
     % Create a mask for the green pixels
-    greenMask = greenThreshold;
+    greenMask = repmat(greenThreshold, [1, 1, 3]);
     % Apply the mask to the region to remove the green pixels
-    region(repmat(greenMask, [1, 1, 3])) = 0;
+    region = bsxfun(@times, region, cast(~greenMask, 'like', region));
     
     %----------------------------------------------------------------------------
     % 3. Remove black-green pixels and small details
@@ -88,48 +81,43 @@ for i = 1:length(files)
     blackGreenThreshold = hsvImage(:,:,1) > 0.25 & hsvImage(:,:,1) < 0.75 ...
         & hsvImage(:,:,2) > 0.1 & hsvImage(:,:,3) < 0.35;
     % Create a mask for the black-green pixels
-    blackGreenMask = blackGreenThreshold;
+    blackGreenMask = repmat(blackGreenThreshold, [1, 1, 3]);
     % Apply the mask to the region to remove the black-green pixels
-    region(repmat(blackGreenMask, [1, 1, 3])) = 0;
+    region = bsxfun(@times, region, cast(~blackGreenMask, 'like', region));
     
     % Create a structuring element
     se = strel('disk', 5);
     % Erode the green mask
     greenMask = imerode(greenMask, se);
     % Apply the eroded mask to the region to remove small details
-    region(repmat(greenMask, [1, 1, 3])) = 0;
+    region = bsxfun(@times, region, cast(~greenMask, 'like', region));
     
     % Replace the region in the image
-    imgMasked(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :) = region;
+    img(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :) = region;
+    % Create an alpha channel of the same size as the image
+    alpha = ones(size(img, 1), size(img, 2)) * 255;
     
-    % Create an alpha channel based on the mask and the content of the region
-    alphaChannel = uint8(~mask) * 255;
-    alphaChannel(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3)) = ...
-        uint8(any(region ~= 0, 3)) * 255;
+    % Find the pixels in the image that are 1 of 255
+    pixelsToMakeTransparent = any(img <= 2 & img >= 0, 3);
     
-    % Combine the ocean image with the masked image
-    oceanImage = cat(3, oceanImage, 255*ones(size(oceanImage, 1), size(oceanImage, 2), 'uint8'));
-    imgMasked = cat(3, imgMasked, alphaChannel);
+    % Set the alpha value of these pixels to 0
+    alpha(pixelsToMakeTransparent) = 0;
+    % Display the alpha channel value
+    disp(alpha);
+    % Pause the execution to see the image
+    pause;
     
-    % Blend the images
-    imgCombined = imoverlay(oceanImage, imgMasked);
+    % Define the output file path
+    outputFilePath = fullfile(outputDirectory, files(i).name);
     
-    % Save the processed image to the new directory
-    imwrite(imgCombined(:,:,1:3), fullfile(processedDirectory, files(i).name), 'png', 'Alpha', imgCombined(:,:,4));
+    % Save the image to the output file path with the alpha channel
+    imwrite(img, outputFilePath, 'png', 'Alpha', alpha);
     
-    % Write the current frame to the video
-    writeVideo(outputVideo, imgCombined(:,:,1:3));
+    % Write the current image to the video file
+    writeVideo(outputVideo, img);
+    
+    % Write the current image to the video file
+    % writeVideo(outputVideo, img);
 end
-
 % Close the VideoWriter object
 close(outputVideo);
-
-function imgOut = imoverlay(background, foreground)
-    alphaChannel = foreground(:,:,4);
-    mask = alphaChannel == 255;
-    imgOut = background;
-    for c = 1:3
-        imgOut(:,:,c) = background(:,:,c) .* uint8(~mask) + foreground(:,:,c) .* uint8(mask);
-    end
-    imgOut = cat(3, imgOut, background(:,:,4));
-end
