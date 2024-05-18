@@ -1,27 +1,41 @@
 % Load the ground truth data
 load('pilot-tracker.mat');
+
 % Specify the directory
 directory = './F15 Image Plane';
-% Define the output directory
-outputDirectory = './F15 Image Plane no bg';
-% Check if the output directory exists, if not, create it
-if ~exist(outputDirectory, 'dir')
-    mkdir(outputDirectory);
-end
+directoryOcean = './F15 Ocean';
+directoryJets = './F15 Fighter Jets';
+directoryFrontMate = './F15 Front Matte';
+directoryGlassMate = './F15 Glass';
+directoryGlassBack = './F15 Glass Matte';
+
 % Get a list of all .png files in the directory
 files = dir(fullfile(directory, '*.png'));
-% Create a VideoWriter object
-outputVideo = VideoWriter('output.avi', 'Uncompressed AVI');
-% Open the VideoWriter object
-open(outputVideo);
+oceanFiles = dir(fullfile(directoryOcean, '*.png'));
+jetsFiles = dir(fullfile(directoryJets, '*.png'));
+frontFiles = dir(fullfile(directoryFrontMate, '*.png'));
+glassBackFiles = dir(fullfile(directoryGlassBack, '*.png'));
+glassFiles = dir(fullfile(directoryGlassMate, '*.png'));
 
-% Initialize the last bounding box
-lastBbox = [];
+% Create a directory for the processed images
+processedDirectory = './F15 Image Plane-noBG';
+if ~exist(processedDirectory, 'dir')
+    mkdir(processedDirectory);
+end
+
+outputVideo = VideoWriter('output.mp4', 'MPEG-4');
+open(outputVideo);
 
 % Loop over all files
 for i = 1:length(files)
     % Read the current image
     img = imread(fullfile(directory, files(i).name));
+    oceanImage = imread(fullfile(directoryOcean, oceanFiles(i).name));
+    jetImage = imread(fullfile(directoryJets, jetsFiles(i).name));
+    frontImage = imread(fullfile(directoryFrontMate, frontFiles(i).name));
+    glassImage = imread(fullfile(directoryGlassMate, glassFiles(i).name));
+    glassBackImage = imread(fullfile(directoryGlassBack, glassBackFiles(i).name));
+
     
     % Get the bounding box for the current image from the ground truth data
     bbox = gTruth.LabelData{i, 1};
@@ -56,10 +70,10 @@ for i = 1:length(files)
     % Set the pixels inside the bounding box to 1
     mask(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3)) = true;
     % Multiply the image by the mask to remove pixels outside the bounding box
-    img = bsxfun(@times, img, cast(mask, class(img)));
+    imgMasked = bsxfun(@times, img, cast(mask, class(img)));
     
     % Extract the region of the image inside the bounding box
-    region = img(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :);
+    region = imgMasked(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :);
     
     %----------------------------------------------------------------------------
     % 2. Quitar todo el croma de dentro de la imagen
@@ -93,31 +107,41 @@ for i = 1:length(files)
     region = bsxfun(@times, region, cast(~greenMask, 'like', region));
     
     % Replace the region in the image
-    img(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :) = region;
-    % Create an alpha channel of the same size as the image
-    alpha = ones(size(img, 1), size(img, 2)) * 255;
+    imgMasked(bbox(2):bbox(2)+bbox(4), bbox(1):bbox(1)+bbox(3), :) = region;
     
-    % Find the pixels in the image that are 1 of 255
-    pixelsToMakeTransparent = any(img <= 2 & img >= 0, 3);
+    % Resize oceanImage to match the size of img
+    oceanImage = imresize(oceanImage, [size(img, 1), size(img, 2)]);
+    jetImage = imresize(jetImage, [size(img, 1), size(img, 2)]);
+    frontImage = imresize(frontImage, [size(img, 1), size(img, 2)]);
+    glassBackImage = imresize(glassBackImage, [size(img, 1), size(img, 2)]);
+
+    %frontImage = imerode(frontImage,se);
+    %jetImage = imerode(jetImage,se);
+
+    % Create a final image by overlaying imgMasked on oceanImage and jetImage
+    imgFinal = oceanImage;
+
+    % Only overlay non-black pixels from jetImage
+    maskNonBlackJet = jetImage ~= 0;
+    imgFinal(maskNonBlackJet) = jetImage(maskNonBlackJet);
+
+    % Only overlay non-black pixels from jetImage
+    maskNonBlackGlass = glassBackImage ~= 0;
+    imgFinal(maskNonBlackGlass) = jetImage(maskNonBlackGlass);
     
-    % Set the alpha value of these pixels to 0
-    alpha(pixelsToMakeTransparent) = 0;
-    % Display the alpha channel value
-    disp(alpha);
-    % Pause the execution to see the image
-    pause;
+    % Only overlay non-black pixels from imgMasked
+    maskNonBlack = imgMasked ~= 0;
+    imgFinal(maskNonBlack) = imgMasked(maskNonBlack);
+
+    % Only overlay non-black pixels from jetImage
+    maskNonBlackFront = frontImage ~= 0;
+    imgFinal(maskNonBlackFront) = frontImage(maskNonBlackFront);
+
+    imgFinal = imfuse(imgFinal,glassImage,'blend');
     
-    % Define the output file path
-    outputFilePath = fullfile(outputDirectory, files(i).name);
-    
-    % Save the image to the output file path with the alpha channel
-    imwrite(img, outputFilePath, 'png', 'Alpha', alpha);
-    
-    % Write the current image to the video file
-    writeVideo(outputVideo, img);
-    
-    % Write the current image to the video file
-    % writeVideo(outputVideo, img);
+    % Save the processed image to the new directory
+    imwrite(imgFinal, fullfile(processedDirectory, files(i).name), 'png');
+    writeVideo(outputVideo, imgFinal);
 end
-% Close the VideoWriter object
+
 close(outputVideo);
